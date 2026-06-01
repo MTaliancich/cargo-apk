@@ -525,7 +525,7 @@ mod tests {
     #[ignore]
     fn test_detect() {
         let ndk = Ndk::from_env().unwrap();
-        assert_eq!(ndk.build_tools_version(), "29.0.2");
-        assert_eq!(ndk.platforms(), &[29, 28]);
+        assert_eq!(ndk.build_tools_version(), "37.0.0");
+        assert_eq!(ndk.platforms(), &[35]);
     }
 }
