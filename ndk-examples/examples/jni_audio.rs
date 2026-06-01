@@ -1,6 +1,6 @@
 use android_activity::AndroidApp;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 fn android_main(_app: AndroidApp) {
     android_logger::init_once(
         android_logger::Config::default().with_max_level(log::LevelFilter::Info),
@@ -53,7 +53,7 @@ fn enumerate_audio_devices() -> Result<(), Box<dyn std::error::Error>> {
             let name =
                 env.call_method(&device, "getProductName", "()Ljava/lang/CharSequence;", &[])?;
             let name = env.call_method(name.l()?, "toString", "()Ljava/lang/String;", &[])?;
-            env.get_string((&name.l()?).into())?.into()
+            let x = env.get_string((&name.l()?).into())?.into(); x
         };
         let id = env.call_method(&device, "getId", "()I", &[])?.i()?;
         let ty = env.call_method(&device, "getType", "()I", &[])?.i()?;
