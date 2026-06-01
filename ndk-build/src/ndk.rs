@@ -232,16 +232,31 @@ impl Ndk {
     }
 
     pub fn platform_dir(&self, platform: u32) -> Result<PathBuf, NdkError> {
-        let dir = self
+        let platform_dir = format!("android-{}", platform);
+        let platforms_dir = self
             .sdk_path
-            .join("platforms")
-            // TODO: If selected/used by Self::highest_supported_platform(),
-            // append the minor suffix
-            .join(format!("android-{platform}"));
-        if !dir.exists() {
+            .join("platforms");
+        let mut platforms = std::fs::read_dir(&platforms_dir)?.filter_map(|path| {
+            if
+            let Ok(path) = path &&
+                let Ok(meta) = path.metadata() &&
+                meta.is_dir()
+            {
+                let os_str_name = path.file_name();
+                let lossy_name = os_str_name.to_string_lossy();
+                let trimmed = lossy_name.trim();
+                if trimmed.starts_with(&platform_dir) {
+                    return Some(path.path().to_owned());
+                }
+            }
+            None
+        }).collect::<Vec<_>>();
+        if platforms.is_empty() {
             return Err(NdkError::PlatformNotFound(platform));
         }
-        Ok(dir)
+        platforms.sort_unstable();
+
+        Ok(platforms.pop().unwrap())
     }
 
     pub fn android_jar(&self, platform: u32) -> Result<PathBuf, NdkError> {
