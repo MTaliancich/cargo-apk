@@ -316,7 +316,7 @@ pub struct Sdk {
 impl Default for Sdk {
     fn default() -> Self {
         Self {
-            min_sdk_version: Some(23),
+            min_sdk_version: Some(29),
             target_sdk_version: None,
             max_sdk_version: None,
         }
