@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::manifest::{Inheritable, Manifest, Root};
 use cargo_subcommand::{Artifact, ArtifactType, CrateType, Profile, Subcommand};
-use ndk_build::apk::{Apk, ApkConfig, UnalignedApk, UnsignedApk};
+use ndk_build::apk::{Apk, ApkConfig, UnsignedApk};
 use ndk_build::cargo::{cargo_ndk, VersionCode};
 use ndk_build::dylibs::get_libs_search_paths;
 use ndk_build::error::NdkError;
@@ -156,7 +156,7 @@ impl<'a> ApkBuilder<'a> {
         }
         Ok(())
     }
-    
+
     pub fn create_config(&self, artifact: &Artifact) -> Result<ApkConfig, Error> {
         // Set artifact specific manifest default values.
         let mut manifest = self.manifest.android_manifest.clone();
@@ -210,7 +210,7 @@ impl<'a> ApkBuilder<'a> {
             strip: self.manifest.strip,
             reverse_port_forward: self.manifest.reverse_port_forward.clone(),
         };
-        
+
         Ok(config)
     }
 
@@ -219,7 +219,7 @@ impl<'a> ApkBuilder<'a> {
 
         let crate_path = self.cmd.manifest().parent().expect("invalid manifest path");
         let is_debug_profile = *self.cmd.profile() == Profile::Dev;
-        
+
         let runtime_libs = self
             .manifest
             .runtime_libs
@@ -267,15 +267,15 @@ impl<'a> ApkBuilder<'a> {
 
         Ok(unsigned)
     }
-    
+
     pub fn skip_signing(&self) -> bool {
         self.manifest.skip_signing
     }
-    
+
     pub fn sign(&self, config: &'a ApkConfig, unsigned: UnsignedApk<'a>) -> Result<Apk, Error> {
         let crate_path = self.cmd.manifest().parent().expect("invalid manifest path");
         let is_debug_profile = *self.cmd.profile() == Profile::Dev;
-        
+
         let profile_name = match self.cmd.profile() {
             Profile::Dev => "dev",
             Profile::Release => "release",
@@ -317,7 +317,7 @@ impl<'a> ApkBuilder<'a> {
                 }
             }
         };
-        
+
         println!(
             "Signing `{}` with keystore `{}`",
             config.apk().display(),
