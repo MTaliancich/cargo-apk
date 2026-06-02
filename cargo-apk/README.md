@@ -102,6 +102,9 @@ apk_name = "myapp"
 # in the `.so`.
 strip = "default"
 
+# Setting this to true will create an unsigned apk on build only. Running will still require the use of a signed apk.
+skip_signing = false
+
 # Folder containing extra shared libraries intended to be dynamically loaded at runtime.
 # Files matching `libs_folder/${android_abi}/*.so` are added to the apk
 # according to the specified build_targets.

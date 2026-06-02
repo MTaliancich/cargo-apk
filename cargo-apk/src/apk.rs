@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::manifest::{Inheritable, Manifest, Root};
 use cargo_subcommand::{Artifact, ArtifactType, CrateType, Profile, Subcommand};
-use ndk_build::apk::{Apk, ApkConfig};
+use ndk_build::apk::{Apk, ApkConfig, UnalignedApk, UnsignedApk};
 use ndk_build::cargo::{cargo_ndk, VersionCode};
 use ndk_build::dylibs::get_libs_search_paths;
 use ndk_build::error::NdkError;
@@ -156,8 +156,8 @@ impl<'a> ApkBuilder<'a> {
         }
         Ok(())
     }
-
-    pub fn build(&self, artifact: &Artifact) -> Result<Apk, Error> {
+    
+    pub fn create_config(&self, artifact: &Artifact) -> Result<ApkConfig, Error> {
         // Set artifact specific manifest default values.
         let mut manifest = self.manifest.android_manifest.clone();
 
@@ -193,11 +193,6 @@ impl<'a> ApkBuilder<'a> {
             .resources
             .as_ref()
             .map(|res| dunce::simplified(&crate_path.join(res)).to_owned());
-        let runtime_libs = self
-            .manifest
-            .runtime_libs
-            .as_ref()
-            .map(|libs| dunce::simplified(&crate_path.join(libs)).to_owned());
         let apk_name = self
             .manifest
             .apk_name
@@ -215,7 +210,21 @@ impl<'a> ApkBuilder<'a> {
             strip: self.manifest.strip,
             reverse_port_forward: self.manifest.reverse_port_forward.clone(),
         };
+        
+        Ok(config)
+    }
+
+    pub fn build(&self, artifact: &Artifact, config: &'a ApkConfig) -> Result<UnsignedApk<'a>, Error> {
         let mut apk = config.create_apk()?;
+
+        let crate_path = self.cmd.manifest().parent().expect("invalid manifest path");
+        let is_debug_profile = *self.cmd.profile() == Profile::Dev;
+        
+        let runtime_libs = self
+            .manifest
+            .runtime_libs
+            .as_ref()
+            .map(|libs| dunce::simplified(&crate_path.join(libs)).to_owned());
 
         for target in &self.build_targets {
             let triple = target.rust_triple();
@@ -254,6 +263,19 @@ impl<'a> ApkBuilder<'a> {
             }
         }
 
+        let unsigned = apk.add_pending_libs_and_align()?;
+
+        Ok(unsigned)
+    }
+    
+    pub fn skip_signing(&self) -> bool {
+        self.manifest.skip_signing
+    }
+    
+    pub fn sign(&self, config: &'a ApkConfig, unsigned: UnsignedApk<'a>) -> Result<Apk, Error> {
+        let crate_path = self.cmd.manifest().parent().expect("invalid manifest path");
+        let is_debug_profile = *self.cmd.profile() == Profile::Dev;
+        
         let profile_name = match self.cmd.profile() {
             Profile::Dev => "dev",
             Profile::Release => "release",
@@ -295,9 +317,7 @@ impl<'a> ApkBuilder<'a> {
                 }
             }
         };
-
-        let unsigned = apk.add_pending_libs_and_align()?;
-
+        
         println!(
             "Signing `{}` with keystore `{}`",
             config.apk().display(),
@@ -307,7 +327,9 @@ impl<'a> ApkBuilder<'a> {
     }
 
     pub fn run(&self, artifact: &Artifact, no_logcat: bool) -> Result<(), Error> {
-        let apk = self.build(artifact)?;
+        let config = self.create_config(artifact)?;
+        let unsigned_apk = self.build(artifact, &config)?;
+        let apk = self.sign(&config, unsigned_apk)?;
         apk.reverse_port_forwarding(self.device_serial.as_deref())?;
         apk.install(self.device_serial.as_deref())?;
         apk.start(self.device_serial.as_deref())?;
@@ -328,7 +350,9 @@ impl<'a> ApkBuilder<'a> {
     }
 
     pub fn gdb(&self, artifact: &Artifact) -> Result<(), Error> {
-        let apk = self.build(artifact)?;
+        let config = self.create_config(artifact)?;
+        let unsigned_apk = self.build(artifact, &config)?;
+        let apk = self.sign(&config, unsigned_apk)?;
         apk.install(self.device_serial.as_deref())?;
 
         let target_dir = self.build_dir.join(artifact.build_dir());

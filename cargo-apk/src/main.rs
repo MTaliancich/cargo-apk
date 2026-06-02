@@ -153,7 +153,11 @@ fn main() -> anyhow::Result<()> {
             let cmd = Subcommand::new(args.subcommand_args)?;
             let builder = ApkBuilder::from_subcommand(&cmd, args.device)?;
             for artifact in cmd.artifacts() {
-                builder.build(artifact)?;
+                let config = builder.create_config(artifact)?;
+                let apk = builder.build(artifact, &config)?;
+                if !builder.skip_signing() {
+                    builder.sign(&config, apk)?;
+                }
             }
         }
         ApkSubCmd::Ndk {
