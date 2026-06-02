@@ -20,6 +20,9 @@ pub struct AndroidManifest {
     #[serde(rename(serialize = "@android:versionName"))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version_name: Option<String>,
+    #[serde(rename(serialize = "@android:installLocation"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub install_location: Option<String>,
     #[serde(rename(serialize = "uses-sdk"))]
     #[serde(default)]
     pub sdk: Sdk,
@@ -45,6 +48,7 @@ impl Default for AndroidManifest {
             shared_user_id: Default::default(),
             version_code: Default::default(),
             version_name: Default::default(),
+            install_location: Default::default(),
             sdk: Default::default(),
             uses_feature: Default::default(),
             uses_permission: Default::default(),

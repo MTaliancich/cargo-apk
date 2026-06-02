@@ -115,6 +115,9 @@ runtime_libs = "path/to/libs_folder"
 # desired, run in the same process.
 shared_user_id = "my.shared.user.id"
 
+# Controls where the app is installed. "preferExternal" or "auto". Defaults to internal only.
+install_location = "auto"
+
 # Defaults to `$HOME/.android/debug.keystore` for the `dev` profile. Will ONLY
 # generate a new debug.keystore if this file does NOT exist. A keystore is never
 # auto-generated for other profiles.
