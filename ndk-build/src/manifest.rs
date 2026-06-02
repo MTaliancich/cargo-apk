@@ -101,6 +101,10 @@ pub struct Application {
     #[serde(rename(serialize = "receiver"))]
     #[serde(default)]
     pub receivers: Vec<Receiver>,
+    #[serde(rename(serialize = "profileable"))]
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profileable: Option<Profileable>,
 }
 
 /// Android [activity element](https://developer.android.com/guide/topics/manifest/activity-element).
@@ -175,6 +179,18 @@ pub struct Receiver {
     #[serde(rename(serialize = "intent-filter"))]
     #[serde(default)]
     pub intent_filter: Vec<IntentFilter>,
+}
+
+/// Android [profileable element](https://developer.android.com/guide/topics/manifest/profileable-element).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Profileable {
+    #[serde(rename(serialize = "@android:shell"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shell: Option<bool>,
+    #[serde(rename(serialize = "@android:enabled"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub enabled: Option<bool>,
 }
 
 /// Android [intent filter element](https://developer.android.com/guide/topics/manifest/intent-filter-element).
