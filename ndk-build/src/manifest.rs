@@ -98,6 +98,9 @@ pub struct Application {
     pub meta_data: Vec<MetaData>,
     #[serde(default)]
     pub activity: Activity,
+    #[serde(rename(serialize = "receiver"))]
+    #[serde(default)]
+    pub receivers: Vec<Receiver>,
 }
 
 /// Android [activity element](https://developer.android.com/guide/topics/manifest/activity-element).
@@ -154,6 +157,24 @@ impl Default for Activity {
             intent_filter: Default::default(),
         }
     }
+}
+
+/// Android [receiver element](https://developer.android.com/guide/topics/manifest/receiver-element).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Receiver {
+    #[serde(rename(serialize = "@android:name"))]
+    pub name: String,
+    #[serde(rename(serialize = "@android:enabled"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(rename(serialize = "@android:exported"))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub exported: Option<bool>,
+    #[serde(rename(serialize = "intent-filter"))]
+    #[serde(default)]
+    pub intent_filter: Vec<IntentFilter>,
 }
 
 /// Android [intent filter element](https://developer.android.com/guide/topics/manifest/intent-filter-element).
