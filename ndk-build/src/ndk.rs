@@ -152,11 +152,21 @@ impl Ndk {
                         .expect("Invalid platform SDK version"),
                 )
             })
-            .filter(|level| (min_platform_level..=max_platform_level).contains(level))
             .collect();
 
         if platforms.is_empty() {
             return Err(NdkError::NoPlatformFound);
+        }
+        let platforms: Vec<u32> = platforms
+            .into_iter()
+            .filter(|level| (min_platform_level..=max_platform_level).contains(level))
+            .collect();
+
+        if platforms.is_empty() {
+            return Err(NdkError::NoPlatformInRange(
+                min_platform_level,
+                max_platform_level,
+            ));
         }
 
         Ok(Self {
