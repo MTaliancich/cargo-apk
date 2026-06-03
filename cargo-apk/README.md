@@ -84,6 +84,11 @@ assets = "path/to/assets_folder"
 # Defaults to package name.
 apk_name = "myapp"
 
+# If you have any java classes that you want to be compiled into the apk, complie it and drop the dex, class, zip, jar, or apk files into this directory.
+# By default, assumes no java code is needed and builds a pure native apk.
+# Will print a warning if the directory does not exist or is empty and build a native only apk.
+compiled_java_resources = "path/to/compiled_java_resources"
+
 # `default` (or unspecified) - Debug symbols, if they exist, are not treated
 #                              specially.
 #

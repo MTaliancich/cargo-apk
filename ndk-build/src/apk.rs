@@ -45,6 +45,7 @@ pub struct ApkConfig {
     pub apk_name: String,
     pub assets: Option<PathBuf>,
     pub resources: Option<PathBuf>,
+    pub java_resources: Option<PathBuf>,
     pub manifest: AndroidManifest,
     pub disable_aapt_compression: bool,
     pub strip: StripConfig,
@@ -95,7 +96,7 @@ impl ApkConfig {
         self.build_dir.join(format!("{}_connected.apks", self.apk_name))
     }
 
-    pub fn create_apk(&self) -> Result<LinkedResources<'_>, NdkError> {
+    pub fn create_resources(&self) -> Result<LinkedResources<'_>, NdkError> {
         std::fs::create_dir_all(&self.build_dir)?;
         self.manifest.write_to(&self.build_dir)?;
 
@@ -263,6 +264,53 @@ impl<'a> LinkedResources<'a> {
         if !dex_dir.exists() {
             std::fs::create_dir_all(&dex_dir)?;
         }
+
+        if let Some(resources) = &self.config.java_resources {
+            let mut files = Vec::new();
+            if resources.exists() {
+                eprintln!("No resources found in {}", resources.display());
+            }
+            for entry in WalkDir::new(resources).into_iter().filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_file() {
+                    let extension = path.extension();
+                    if let Some(extension) = extension {
+                        let extension = extension.to_ascii_lowercase();
+                        let str = extension.to_string_lossy().to_string();
+                        match str.as_str() {
+                            "dex" | "class" | "zip" | "jar" | "apk" => {
+                                files.push(path.to_owned());
+                            }
+                            _ => {
+                                eprintln!("Unsupported file type: {}", path.display());
+                            }
+                        }
+                    }
+                }
+            }
+            if files.is_empty() {
+                eprintln!("No resources found in {}", resources.display());
+            }
+            let mut d8 = self.config.build_tool(bin!("d8"))?;
+            d8
+                .arg("--output")
+                .arg(format!("{}", dex_dir.display()))
+                .arg("--android-platform-build")
+                .arg("--min-api")
+                .arg(format!("{}", self.config.manifest.sdk.min_sdk_version.unwrap_or(self.config.manifest.sdk.target_sdk_version.unwrap_or(self.config.ndk.default_target_platform()))));
+            if self.config.manifest.application.debuggable.unwrap_or(false) {
+                d8.arg("--debug");
+            } else {
+                d8.arg("--release");
+            }
+            for file in files {
+                d8.arg(file);
+            }
+            if !d8.status()?.success() {
+                return Err(NdkError::CmdFailed(Box::new(d8)));
+            }
+        }
+
         if lib_dir.exists() {
             if lib_dir.is_dir() {
                 std::fs::remove_dir_all(&lib_dir)?;

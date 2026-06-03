@@ -199,12 +199,17 @@ impl<'a> ApkBuilder<'a> {
             .clone()
             .unwrap_or_else(|| artifact.name.to_string());
 
+        if self.manifest.compiled_java_resources.is_some() {
+            manifest.application.has_code = true;
+        }
+
         let config = ApkConfig {
             ndk: self.ndk.clone(),
             build_dir: self.build_dir.join(artifact.build_dir()),
             apk_name,
             assets,
             resources,
+            java_resources: self.manifest.compiled_java_resources.clone(),
             manifest,
             disable_aapt_compression: is_debug_profile,
             strip: self.manifest.strip,
@@ -215,7 +220,7 @@ impl<'a> ApkBuilder<'a> {
     }
 
     pub fn build(&self, artifact: &Artifact, config: &'a ApkConfig) -> Result<UnsignedAab<'a>, Error> {
-        let mut apk = config.create_apk()?;
+        let mut apk_resources = config.create_resources()?;
 
         let crate_path = self.cmd.manifest().parent().expect("invalid manifest path");
 
@@ -255,14 +260,14 @@ impl<'a> ApkBuilder<'a> {
                 .map(|path| path.as_path())
                 .collect::<Vec<_>>();
 
-            apk.add_lib_recursively(&artifact, *target, libs_search_paths.as_slice())?;
+            apk_resources.add_lib_recursively(&artifact, *target, libs_search_paths.as_slice())?;
 
             if let Some(runtime_libs) = &runtime_libs {
-                apk.add_runtime_libs(runtime_libs, *target, libs_search_paths.as_slice())?;
+                apk_resources.add_runtime_libs(runtime_libs, *target, libs_search_paths.as_slice())?;
             }
         }
 
-        let unsigned = apk.add_pending_libs_and_align()?;
+        let unsigned = apk_resources.add_pending_libs_and_align()?;
 
         Ok(unsigned)
     }

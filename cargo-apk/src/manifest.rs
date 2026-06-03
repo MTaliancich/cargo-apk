@@ -18,6 +18,7 @@ pub enum Inheritable<T> {
 pub(crate) struct Manifest {
     pub(crate) version: Inheritable<String>,
     pub(crate) apk_name: Option<String>,
+    pub(crate) compiled_java_resources: Option<PathBuf>,
     pub(crate) android_manifest: AndroidManifest,
     pub(crate) build_targets: Vec<Target>,
     pub(crate) assets: Option<PathBuf>,
@@ -46,6 +47,7 @@ impl Manifest {
         Ok(Self {
             version: package.version,
             apk_name: metadata.apk_name,
+            compiled_java_resources: metadata.compiled_java_resources,
             android_manifest: metadata.android_manifest,
             build_targets: metadata.build_targets,
             assets: metadata.assets,
@@ -103,6 +105,7 @@ struct AndroidMetadata {
     #[serde(default)]
     build_targets: Vec<Target>,
     assets: Option<PathBuf>,
+    compiled_java_resources: Option<PathBuf>,
     resources: Option<PathBuf>,
     runtime_libs: Option<PathBuf>,
     /// Maps profiles to keystores
