@@ -458,7 +458,6 @@ impl SignedAab {
     }
 
     pub fn build_apks(&self) -> Result<(), NdkError> {
-        let adb_bin = self.ndk.adb_path()?;
         let aapt2_bin = self.ndk.aapt2_path()?;
         let mut bundle_tool = self.ndk.bundle_tool()?;
         bundle_tool
@@ -470,7 +469,6 @@ impl SignedAab {
             .arg(format!("--ks-key-alias={}", self.key.alias))
             .arg(format!("--ks-pass=pass:{}", self.key.password))
             .arg(format!("--aapt2={}", aapt2_bin.display()))
-            .arg(format!("--adb={}", adb_bin.display()))
             .arg("--enable-sparse-encoding");
         if !bundle_tool.status()?.success() {
             return Err(NdkError::CmdFailed(Box::new(bundle_tool)));
@@ -605,7 +603,6 @@ impl<'a> UnsignedAab<'a> {
     }
 
     pub fn build_apks(&self) -> Result<(), NdkError> {
-        let adb_bin = self.0.ndk.adb_path()?;
         let aapt2_bin = self.0.ndk.aapt2_path()?;
         let mut bundle_tool = self.0.ndk.bundle_tool()?;
         bundle_tool
@@ -614,7 +611,6 @@ impl<'a> UnsignedAab<'a> {
             .arg(format!("--output={}", self.0.apks_zip().display()))
             .arg("--overwrite")
             .arg(format!("--aapt2={}", aapt2_bin.display()))
-            .arg(format!("--adb={}", adb_bin.display()))
             .arg("--enable-sparse-encoding");
         if !bundle_tool.status()?.success() {
             return Err(NdkError::CmdFailed(Box::new(bundle_tool)));
