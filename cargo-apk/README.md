@@ -1,24 +1,25 @@
-# Create Android packages (APKs) from native Rust crates
+# Create Android packages (APKs) and Bundles (AABs) from native Rust crates
 
 [![Actions Status](https://github.com/rust-mobile/cargo-apk/actions/workflows/rust.yml/badge.svg)](https://github.com/rust-mobile/cargo-apk/actions)
 [![Latest version](https://img.shields.io/crates/v/cargo-apk.svg?logo=rust)](https://crates.io/crates/cargo-apk)
 [![MSRV](https://img.shields.io/badge/rustc-1.70.0+-ab6000.svg)](https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html)
 [![Documentation](https://docs.rs/cargo-apk/badge.svg)](https://docs.rs/cargo-apk)
-[![Lines of code](https://tokei.rs/b1/github/rust-mobile/cargo-apk)](https://github.com/rust-mobile/cargo-apk)
 ![MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)
 
-Tool for creating Android packages from native Rust crates, requiring minimal setup and tooling.  Ideal for apps that provide a [`NativeActivity`] via our [`ndk` crate].
+Tool for creating Android packages from native Rust crates, requiring minimal setup and tooling.  Ideal for apps that provide a [`NativeActivity`] via the [`ndk` crate].
+
+This fork will stay up to date with fixes and features in the original repository but will maintain new android features that may not align with the original repository's vision.
 
 [`NativeActivity`]: https://developer.android.com/reference/android/app/NativeActivity
 [`ndk` crate]: https://crates.io/crates/ndk
 
 ## Installation
 
-From crates.io:
+From MainLine:
 
 ```console
-$ cargo install cargo-apk
+$ cargo install cargo-apk --git https://github.com/MTaliancich/cargo-apk
 ```
 
 From locally downloaded or cloned source:

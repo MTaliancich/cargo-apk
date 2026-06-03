@@ -9,10 +9,10 @@ anyhow = "1"
 jni = "0.22"
 rustix = { version = "1", features = ["pipe"] }
 log = "0.4.14"
-ndk = { version = "0.9", features = ["api-level-23"] }
+ndk = { version = "0.10", features = ["api-level-23"], git = "https://github.com/MTaliancich/ndk.git" }
 ndk-context = "0.1.1"
 android_logger = "0.15"
-android-activity = { version = "0.6", features = ["native-activity"] }
+android-activity = { version = "0.7", features = ["native-activity"], git = "https://github.com/MTaliancich/android-activity.git" }
 
 [[example]]
 name = "hello_world"
