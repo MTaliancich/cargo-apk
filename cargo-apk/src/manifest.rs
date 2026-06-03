@@ -121,4 +121,5 @@ struct AndroidMetadata {
 pub(crate) struct Signing {
     pub(crate) path: PathBuf,
     pub(crate) keystore_password: String,
+    pub(crate) keystore_alias: String,
 }

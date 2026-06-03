@@ -18,3 +18,6 @@ quick-xml = { version = "0.40", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 which = "8"
+zip = { version = "8", default-features = false, features = ["deflate"] }
+walkdir = "2"
+reqwest = { version = "0.13", default-features = true, features = ["deflate", "blocking"] }

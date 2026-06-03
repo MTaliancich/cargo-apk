@@ -5,9 +5,14 @@ use crate::target::Target;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ffi::OsStr;
-use std::fs;
+use std::{fs, io};
+use std::fs::File;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use walkdir::WalkDir;
+use zip::{CompressionMethod, ZipArchive, ZipWriter};
+use zip::write::FileOptions;
 
 /// The options for how to treat debug symbols that are present in any `.so`
 /// files that are added to the APK.
@@ -53,19 +58,44 @@ impl ApkConfig {
         Ok(cmd)
     }
 
-    fn unaligned_apk(&self) -> PathBuf {
+    fn linked_res(&self) -> PathBuf {
         self.build_dir
-            .join(format!("{}-unaligned.apk", self.apk_name))
+            .join(format!("{}_res.zip", self.apk_name))
     }
 
-    /// Retrieves the path of the APK that will be written when [`UnsignedApk::sign`]
+    fn unaligned_zip(&self) -> PathBuf {
+        self.build_dir
+            .join(format!("{}_unaligned.zip", self.apk_name))
+    }
+
+    fn aligned_zip(&self) -> PathBuf {
+        self.build_dir
+            .join(format!("{}_aligned.zip", self.apk_name))
+    }
+
+    /// Retrieves the path of the APK that will be written when [`UnsignedAab::sign`]
     /// is invoked
     #[inline]
     pub fn apk(&self) -> PathBuf {
         self.build_dir.join(format!("{}.apk", self.apk_name))
     }
 
-    pub fn create_apk(&self) -> Result<UnalignedApk<'_>, NdkError> {
+    #[inline]
+    pub fn aab(&self) -> PathBuf {
+        self.build_dir.join(format!("{}.aab", self.apk_name))
+    }
+
+    #[inline]
+    pub fn apks_zip(&self) -> PathBuf {
+        self.build_dir.join(format!("{}.apks", self.apk_name))
+    }
+
+    #[inline]
+    pub fn apks_connected_zip(&self) -> PathBuf {
+        self.build_dir.join(format!("{}_connected.apks", self.apk_name))
+    }
+
+    pub fn create_apk(&self) -> Result<LinkedResources<'_>, NdkError> {
         std::fs::create_dir_all(&self.build_dir)?;
         self.manifest.write_to(&self.build_dir)?;
 
@@ -74,45 +104,59 @@ impl ApkConfig {
             .sdk
             .target_sdk_version
             .unwrap_or_else(|| self.ndk.default_target_platform());
-        let mut aapt = self.build_tool(bin!("aapt"))?;
-        aapt.arg("package")
-            .arg("-f")
-            .arg("-F")
-            .arg(self.unaligned_apk())
-            .arg("-M")
-            .arg("AndroidManifest.xml")
+
+        let mut resources = None;
+        if let Some(res) = &self.resources && res.exists() {
+            resources = Option::Some(self.build_dir.join("compiled_resources.zip"));
+            let mut aapt = self.build_tool(bin!("aapt2"))?;
+            aapt.arg("compile")
+                .arg("--dir")
+                .arg(format!("{}", res.display()))
+                .arg("-o")
+                .arg(format!("{}", resources.as_ref().unwrap().display()));
+            if !aapt.status()?.success() {
+                return Err(NdkError::CmdFailed(Box::new(aapt)));
+            }
+        }
+        let mut aapt = self.build_tool(bin!("aapt2"))?;
+        aapt.arg("link")
+            .arg("--proto-format")
+            .arg("-o")
+            .arg(format!("{}", self.linked_res().display()))
             .arg("-I")
-            .arg(self.ndk.android_jar(target_sdk_version)?);
+            .arg(self.ndk.android_jar(target_sdk_version)?)
+            .arg("--manifest")
+            .arg("AndroidManifest.xml");
 
         if self.disable_aapt_compression {
             aapt.arg("-0").arg("");
-        }
-
-        if let Some(res) = &self.resources {
-            aapt.arg("-S").arg(res);
         }
 
         if let Some(assets) = &self.assets {
             aapt.arg("-A").arg(assets);
         }
 
+        if let Some(res) = resources {
+            aapt.arg(format!("{}", res.display()));
+        }
+
         if !aapt.status()?.success() {
             return Err(NdkError::CmdFailed(Box::new(aapt)));
         }
 
-        Ok(UnalignedApk {
+        Ok(LinkedResources {
             config: self,
             pending_libs: HashSet::default(),
         })
     }
 }
 
-pub struct UnalignedApk<'a> {
+pub struct LinkedResources<'a> {
     config: &'a ApkConfig,
     pending_libs: HashSet<String>,
 }
 
-impl<'a> UnalignedApk<'a> {
+impl<'a> LinkedResources<'a> {
     pub fn config(&self) -> &ApkConfig {
         self.config
     }
@@ -196,79 +240,157 @@ impl<'a> UnalignedApk<'a> {
         Ok(())
     }
 
-    pub fn add_pending_libs_and_align(self) -> Result<UnsignedApk<'a>, NdkError> {
-        let mut aapt = self.config.build_tool(bin!("aapt"))?;
-        aapt.arg("add");
-
-        // TODO: We might want to disable library compression separately, which allows them to be
-        // mmap'ed without decompression step after installation.
-        if self.config.disable_aapt_compression {
-            aapt.arg("-0").arg("");
+    pub fn add_pending_libs_and_align(self) -> Result<UnsignedAab<'a>, NdkError> {
+        let workspace = self.config.build_dir.join("extracted_res_workspace");
+        let base = self.config.unaligned_zip();
+        if !workspace.exists() {
+            std::fs::create_dir_all(&workspace)?;
+        }
+        {
+            let zip_reader = BufReader::new(File::open(self.config.linked_res())?);
+            let mut archive = ZipArchive::new(zip_reader)?;
+            archive.extract(&workspace)?;
         }
 
-        aapt.arg(self.config.unaligned_apk());
-
-        for lib_path_unix in self.pending_libs {
-            aapt.arg(lib_path_unix);
+        let res_dir = workspace.join("res");
+        let dex_dir = workspace.join("dex");
+        let lib_dir = workspace.join("lib");
+        let manifest_dir = workspace.join("manifest");
+        let original_lib_dir = self.config.build_dir.join("lib");
+        if !res_dir.exists() {
+            std::fs::create_dir_all(&res_dir)?;
+        }
+        if !dex_dir.exists() {
+            std::fs::create_dir_all(&dex_dir)?;
+        }
+        if lib_dir.exists() {
+            if lib_dir.is_dir() {
+                std::fs::remove_dir_all(&lib_dir)?;
+            } else {
+                std::fs::remove_file(&lib_dir)?;
+            }
+        }
+        for entry in WalkDir::new(&original_lib_dir).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let name = path.strip_prefix(Path::new(&original_lib_dir)).unwrap();
+            let new_path = lib_dir.join(name);
+            if path.is_dir() {
+                std::fs::create_dir_all(&new_path)?;
+            } else {
+                std::fs::copy(path, new_path)?;
+            }
         }
 
-        if !aapt.status()?.success() {
-            return Err(NdkError::CmdFailed(Box::new(aapt)));
+        let manifest = manifest_dir.join("AndroidManifest.xml");
+        let old_manifest = workspace.join("AndroidManifest.xml");
+
+        if !old_manifest.exists() {
+            return Err(NdkError::PathNotFound(old_manifest));
         }
+        if !manifest_dir.exists() {
+            std::fs::create_dir_all(&manifest_dir)?;
+        }
+        std::fs::copy(&old_manifest, manifest)?;
+        std::fs::remove_file(old_manifest)?;
+
+        let deflated_options = FileOptions::DEFAULT
+            .compression_method(CompressionMethod::Deflated)
+            .compression_level(Some(9));
+        let stored_options = FileOptions::DEFAULT
+            .compression_method(CompressionMethod::Stored);
+
+        let mut zip_file = ZipWriter::new(File::create(base)?);
+
+        for entry in WalkDir::new(&workspace).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+
+            // Strip the "workspace" prefix to get the relative internal zip path
+            let name = path.strip_prefix(Path::new(&workspace)).unwrap();
+
+            // Skip the root workspace directory entry itself
+            if name.as_os_str().is_empty() {
+                continue;
+            }
+
+            // Convert path separators to forward slashes format (required by ZIP spec)
+            let name_str = name.to_string_lossy().replace('\\', "/");
+
+            if path.is_dir() {
+                // ZIP directories must end with a trailing forward slash
+                zip_file.add_directory(format!("{}/", name_str), deflated_options)?;
+            } else if path.is_file() {
+                if name_str.ends_with(".DS_Store") {
+                    continue;
+                }
+                // Check if the file lives inside the 'lib/' folder
+                let options = if name_str.starts_with("lib/") {
+                    stored_options
+                } else {
+                    deflated_options
+                };
+
+                // Begin writing the file entry
+                zip_file.start_file(name_str, options)?;
+
+                // Stream the file contents into the zip archive
+                let mut f = File::open(path)?;
+                io::copy(&mut f, &mut zip_file)?;
+            }
+        }
+
+        zip_file.finish()?;
 
         let mut zipalign = self.config.build_tool(bin!("zipalign"))?;
         zipalign
             .arg("-f")
             .arg("-v")
-            // Force all uncompressed libraries to be 16KiB-aligned for Android 15+
-            // TODO: This requires build-tools 35.0.0
             .args(["-P", "16"])
             .arg("4")
-            .arg(self.config.unaligned_apk())
-            .arg(self.config.apk());
+            .arg(self.config.unaligned_zip())
+            .arg(self.config.aligned_zip());
 
         if !zipalign.status()?.success() {
             return Err(NdkError::CmdFailed(Box::new(zipalign)));
         }
 
-        Ok(UnsignedApk(self.config))
-    }
-}
+        let mut bundle_tools = self.config.ndk.bundle_tool()?;
 
-pub struct UnsignedApk<'a>(&'a ApkConfig);
-
-impl<'a> UnsignedApk<'a> {
-    pub fn sign(self, key: Key) -> Result<Apk, NdkError> {
-        let mut apksigner = self.0.build_tool(bat!("apksigner"))?;
-        apksigner
-            .arg("sign")
-            .arg("--ks")
-            .arg(&key.path)
-            .arg("--ks-pass")
-            .arg(format!("pass:{}", &key.password))
-            .arg(self.0.apk());
-        if !apksigner.status()?.success() {
-            return Err(NdkError::CmdFailed(Box::new(apksigner)));
+        bundle_tools
+            .arg("build-bundle")
+            .arg(format!("--modules={}", self.config.aligned_zip().display()))
+            .arg(format!("--output={}", self.config.aab().display()))
+            .arg("--overwrite");
+        if !bundle_tools.status()?.success() {
+            return Err(NdkError::CmdFailed(Box::new(bundle_tools)));
         }
-        Ok(Apk::from_config(self.0))
+
+        Ok(UnsignedAab(self.config))
     }
 }
 
-pub struct Apk {
+pub struct UnsignedAab<'a>(&'a ApkConfig);
+
+pub struct SignedAab {
     path: PathBuf,
+    apks: PathBuf,
+    apks_connected: PathBuf,
     package_name: String,
     ndk: Ndk,
     reverse_port_forward: HashMap<String, String>,
+    key: Key
 }
 
-impl Apk {
-    pub fn from_config(config: &ApkConfig) -> Self {
+impl SignedAab {
+    pub fn from_config(config: &ApkConfig, key: Key) -> Self {
         let ndk = config.ndk.clone();
         Self {
-            path: config.apk(),
+            path: config.aab(),
+            apks: config.apks_zip(),
+            apks_connected: config.apks_connected_zip(),
             package_name: config.manifest.package.clone(),
             ndk,
             reverse_port_forward: config.reverse_port_forward.clone(),
+            key,
         }
     }
 
@@ -287,13 +409,70 @@ impl Apk {
         Ok(())
     }
 
-    pub fn install(&self, device_serial: Option<&str>) -> Result<(), NdkError> {
-        let mut adb = self.ndk.adb(device_serial)?;
-
-        adb.arg("install").arg("-r").arg(&self.path);
-        if !adb.status()?.success() {
-            return Err(NdkError::CmdFailed(Box::new(adb)));
+    pub fn build_apks(&self) -> Result<(), NdkError> {
+        let adb_bin = self.ndk.adb_path()?;
+        let aapt2_bin = self.ndk.aapt2_path()?;
+        let mut bundle_tool = self.ndk.bundle_tool()?;
+        bundle_tool
+            .arg("build-apks")
+            .arg(format!("--bundle={}", self.path.display()))
+            .arg(format!("--output={}", self.apks.display()))
+            .arg("--overwrite")
+            .arg(format!("--ks={}", self.key.path.display()))
+            .arg(format!("--ks-key-alias={}", self.key.alias))
+            .arg(format!("--ks-pass=pass:{}", self.key.password))
+            .arg(format!("--aapt2={}", aapt2_bin.display()))
+            .arg(format!("--adb={}", adb_bin.display()))
+            .arg("--enable-sparse-encoding");
+        if !bundle_tool.status()?.success() {
+            return Err(NdkError::CmdFailed(Box::new(bundle_tool)));
         }
+        Ok(())
+    }
+
+    pub fn install(&self, device_serial: Option<&str>) -> Result<(), NdkError> {
+        let adb_bin = self.ndk.adb_path()?;
+        let aapt2_bin = self.ndk.aapt2_path()?;
+        let mut bundle_tool = self.ndk.bundle_tool()?;
+        bundle_tool
+            .arg("build-apks")
+            .arg(format!("--bundle={}", self.path.display()))
+            .arg(format!("--output={}", self.apks_connected.display()))
+            .arg("--overwrite")
+            .arg(format!("--ks={}", self.key.path.display()))
+            .arg(format!("--ks-key-alias={}", self.key.alias))
+            .arg(format!("--ks-pass=pass:{}", self.key.password))
+            .arg(format!("--aapt2={}", aapt2_bin.display()))
+            .arg(format!("--adb={}", adb_bin.display()))
+            .arg("--enable-sparse-encoding")
+            .arg("--local-testing");
+        if let Some(device_serial) = device_serial {
+            bundle_tool.arg(format!("--device-id={}", device_serial));
+        } else {
+            bundle_tool.arg("--connected-device");
+        }
+
+        if !bundle_tool.status()?.success() {
+            return Err(NdkError::CmdFailed(Box::new(bundle_tool)));
+        }
+
+        let mut bundle_tool = self.ndk.bundle_tool()?;
+        bundle_tool
+            .arg("install-apks")
+            .arg(format!("--apks={}", self.apks_connected.display()))
+            .arg(format!("--adb={}", adb_bin.display()))
+            .arg("--allow-test-only")
+            .arg("--grant-runtime-permissions")
+            .arg("");
+
+        if let Some(device_serial) = device_serial {
+            bundle_tool.arg(format!("--device-id={}", device_serial));
+        }
+
+        if !bundle_tool.status()?.success() {
+            return Err(NdkError::CmdFailed(Box::new(bundle_tool)));
+        }
+
         Ok(())
     }
 
@@ -344,5 +523,54 @@ impl Apk {
             .ok_or(NdkError::UidNotInOutput(output.to_owned()))?;
         uid.parse()
             .map_err(|e| NdkError::NotAUid(e, uid.to_owned()))
+    }
+
+    /*pub fn create_apks(&self) -> Result<Vec<UnsignedApk<'a>>, NdkError> {
+        let mut bundle_tool = self.0.ndk.bundle_tool()?;
+        // build-apks --bundle=app-release.aab --output=app.apks
+        bundle_tool
+            .arg("build-apks")
+            .arg(format!("--bundle={}", self.0.aab().display()))
+            .arg(format!("--output={}", self.0.apks_zip().display()));
+        if !bundle_tool.status()?.success() {
+            return Err(NdkError::CmdFailed(Box::new(bundle_tool)));
+        }
+        // Apk::from_config(self.0)
+        Ok(vec![])
+    }*/
+}
+
+impl<'a> UnsignedAab<'a> {
+    pub fn sign(self, key: Key) -> Result<SignedAab, NdkError> {
+        let mut jarsigner = self.0.ndk.jarsigner()?;
+        jarsigner
+            .arg("-keystore")
+            .arg(&key.path)
+            .arg("-storepass")
+            .arg(format!("{}", &key.password))
+            .arg(self.0.aab())
+            .arg(&key.alias);
+        if !jarsigner.status()?.success() {
+            return Err(NdkError::CmdFailed(Box::new(jarsigner)));
+        }
+        Ok(SignedAab::from_config(self.0, key))
+    }
+
+    pub fn build_apks(&self) -> Result<(), NdkError> {
+        let adb_bin = self.0.ndk.adb_path()?;
+        let aapt2_bin = self.0.ndk.aapt2_path()?;
+        let mut bundle_tool = self.0.ndk.bundle_tool()?;
+        bundle_tool
+            .arg("build-apks")
+            .arg(format!("--bundle={}", self.0.aab().display()))
+            .arg(format!("--output={}", self.0.apks_zip().display()))
+            .arg("--overwrite")
+            .arg(format!("--aapt2={}", aapt2_bin.display()))
+            .arg(format!("--adb={}", adb_bin.display()))
+            .arg("--enable-sparse-encoding");
+        if !bundle_tool.status()?.success() {
+            return Err(NdkError::CmdFailed(Box::new(bundle_tool)));
+        }
+        Ok(())
     }
 }

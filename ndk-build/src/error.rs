@@ -44,6 +44,10 @@ pub enum NdkError {
     Io(#[from] IoError),
     #[error("IoError on `{0:?}`: {1}")]
     IoPathError(PathBuf, #[source] IoError),
+    #[error(transparent)]
+    ZipArchiveError(#[from] zip::result::ZipError),
+    #[error(transparent)]
+    DownloadBundleToolsError(#[from] reqwest::Error),
     #[error("Invalid semver")]
     InvalidSemver,
     #[error("Command `{}` had a non-zero exit code.", format!("{:?}", .0).replace('"', ""))]

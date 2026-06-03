@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::manifest::{Inheritable, Manifest, Root};
 use cargo_subcommand::{Artifact, ArtifactType, CrateType, Profile, Subcommand};
-use ndk_build::apk::{Apk, ApkConfig, UnsignedApk};
+use ndk_build::apk::{ApkConfig, SignedAab, UnsignedAab};
 use ndk_build::cargo::{cargo_ndk, VersionCode};
 use ndk_build::dylibs::get_libs_search_paths;
 use ndk_build::error::NdkError;
@@ -214,11 +214,10 @@ impl<'a> ApkBuilder<'a> {
         Ok(config)
     }
 
-    pub fn build(&self, artifact: &Artifact, config: &'a ApkConfig) -> Result<UnsignedApk<'a>, Error> {
+    pub fn build(&self, artifact: &Artifact, config: &'a ApkConfig) -> Result<UnsignedAab<'a>, Error> {
         let mut apk = config.create_apk()?;
 
         let crate_path = self.cmd.manifest().parent().expect("invalid manifest path");
-        let is_debug_profile = *self.cmd.profile() == Profile::Dev;
 
         let runtime_libs = self
             .manifest
@@ -272,7 +271,7 @@ impl<'a> ApkBuilder<'a> {
         self.manifest.skip_signing
     }
 
-    pub fn sign(&self, config: &'a ApkConfig, unsigned: UnsignedApk<'a>) -> Result<Apk, Error> {
+    pub fn sign(&self, config: &'a ApkConfig, unsigned: UnsignedAab<'a>) -> Result<SignedAab, Error> {
         let crate_path = self.cmd.manifest().parent().expect("invalid manifest path");
         let is_debug_profile = *self.cmd.profile() == Profile::Dev;
 
@@ -287,28 +286,36 @@ impl<'a> ApkBuilder<'a> {
             profile_name.to_uppercase().replace('-', "_")
         );
         let password_env = format!("{keystore_env}_PASSWORD");
+        let alias_env = format!("{keystore_env}_ALIAS");
 
         let path = std::env::var_os(&keystore_env).map(PathBuf::from);
         let password = std::env::var(&password_env).ok();
+        let alias = std::env::var(&alias_env).ok();
 
-        let signing_key = match (path, password) {
-            (Some(path), Some(password)) => Key { path, password },
-            (Some(path), None) if is_debug_profile => {
+        let signing_key = match (path, password, alias) {
+            (Some(path), Some(password), Some(alias)) => Key { path, password, alias },
+            (Some(path), None, Some(alias)) if is_debug_profile => {
                 eprintln!("{password_env} not specified, falling back to default password");
                 Key {
                     path,
                     password: ndk_build::ndk::DEFAULT_DEV_KEYSTORE_PASSWORD.to_owned(),
+                    alias,
                 }
             }
-            (Some(path), None) => {
+            (Some(path), None, _) => {
                 eprintln!("`{}` was specified via `{}`, but `{}` was not specified, both or neither must be present for profiles other than `dev`", path.display(), keystore_env, password_env);
                 return Err(Error::MissingReleaseKey(profile_name.to_owned()));
             }
-            (None, _) => {
+            (Some(path), Some(_password), None) => {
+                eprintln!("`{}` was specified via `{}` and password was specified, but `{}` was not specified, all or none must be present for profiles other than `dev`", path.display(), keystore_env, alias_env);
+                return Err(Error::MissingReleaseKey(profile_name.to_owned()));
+            }
+            (None, _, _) => {
                 if let Some(msk) = self.manifest.signing.get(profile_name) {
                     Key {
                         path: crate_path.join(&msk.path),
                         password: msk.keystore_password.clone(),
+                        alias: msk.keystore_alias.clone(),
                     }
                 } else if is_debug_profile {
                     self.ndk.debug_key()?
@@ -329,11 +336,11 @@ impl<'a> ApkBuilder<'a> {
     pub fn run(&self, artifact: &Artifact, no_logcat: bool) -> Result<(), Error> {
         let config = self.create_config(artifact)?;
         let unsigned_apk = self.build(artifact, &config)?;
-        let apk = self.sign(&config, unsigned_apk)?;
-        apk.reverse_port_forwarding(self.device_serial.as_deref())?;
-        apk.install(self.device_serial.as_deref())?;
-        apk.start(self.device_serial.as_deref())?;
-        let uid = apk.uidof(self.device_serial.as_deref())?;
+        let aab = self.sign(&config, unsigned_apk)?;
+        aab.reverse_port_forwarding(self.device_serial.as_deref())?;
+        aab.install(self.device_serial.as_deref())?;
+        aab.start(self.device_serial.as_deref())?;
+        let uid = aab.uidof(self.device_serial.as_deref())?;
 
         if !no_logcat {
             self.ndk
@@ -352,8 +359,8 @@ impl<'a> ApkBuilder<'a> {
     pub fn gdb(&self, artifact: &Artifact) -> Result<(), Error> {
         let config = self.create_config(artifact)?;
         let unsigned_apk = self.build(artifact, &config)?;
-        let apk = self.sign(&config, unsigned_apk)?;
-        apk.install(self.device_serial.as_deref())?;
+        let aab = self.sign(&config, unsigned_apk)?;
+        aab.install(self.device_serial.as_deref())?;
 
         let target_dir = self.build_dir.join(artifact.build_dir());
         self.ndk.ndk_gdb(

@@ -154,9 +154,12 @@ fn main() -> anyhow::Result<()> {
             let builder = ApkBuilder::from_subcommand(&cmd, args.device)?;
             for artifact in cmd.artifacts() {
                 let config = builder.create_config(artifact)?;
-                let apk = builder.build(artifact, &config)?;
+                let aab = builder.build(artifact, &config)?;
                 if !builder.skip_signing() {
-                    builder.sign(&config, apk)?;
+                    let signed = builder.sign(&config, aab)?;
+                    signed.build_apks()?;
+                } else {
+                    aab.build_apks()?;
                 }
             }
         }

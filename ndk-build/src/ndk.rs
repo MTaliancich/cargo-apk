@@ -202,6 +202,9 @@ impl Ndk {
     }
 
     pub fn build_tool(&self, tool: &str) -> Result<Command, NdkError> {
+        Ok(Command::new(self.build_tool_path(tool)?))
+    }
+    pub fn build_tool_path(&self, tool: &str) ->  Result<PathBuf, NdkError> {
         let path = self
             .sdk_path
             .join("build-tools")
@@ -210,7 +213,11 @@ impl Ndk {
         if !path.exists() {
             return Err(NdkError::CmdNotFound(tool.to_string()));
         }
-        Ok(Command::new(dunce::canonicalize(path)?))
+        Ok(dunce::canonicalize(path)?)
+    }
+
+    pub fn aapt2_path(&self) -> Result<PathBuf, NdkError> {
+        self.build_tool_path(bin!("aapt2"))
     }
 
     pub fn platform_tool_path(&self, tool: &str) -> Result<PathBuf, NdkError> {
@@ -425,6 +432,24 @@ impl Ndk {
         Ok(android_user_home)
     }
 
+    const BUNDLE_TOOLS_VERSION: &'static str = "1.18.3";
+
+    pub fn android_bundle_tools(&self) -> Result<PathBuf, NdkError> {
+        let path = self.android_user_home()?.join(format!("bundle-tools-{}.jar", Self::BUNDLE_TOOLS_VERSION));
+        if !path.exists() {
+            let url = format!("https://github.com/google/bundletool/releases/download/{}/bundletool-all-{}.jar", Self::BUNDLE_TOOLS_VERSION, Self::BUNDLE_TOOLS_VERSION);
+
+            let res = reqwest::blocking::get(&url)?;
+
+            if !res.status().is_success() {
+                return Err(NdkError::Io(std::io::Error::other(format!("Failed to download bundle-tools.jar: {}", res.status()))));
+            }
+            std::fs::write(&path, res.bytes()?)?;
+        }
+
+        Ok(path)
+    }
+
     pub fn keytool(&self) -> Result<Command, NdkError> {
         if let Ok(keytool) = which::which(bin!("keytool")) {
             return Ok(Command::new(keytool));
@@ -438,8 +463,38 @@ impl Ndk {
         Err(NdkError::CmdNotFound("keytool".to_string()))
     }
 
+    pub fn jarsigner(&self) -> Result<Command, NdkError> {
+        if let Ok(jarsigner) = which::which(bin!("jarsigner")) {
+            return Ok(Command::new(jarsigner));
+        }
+        if let Ok(java) = std::env::var("JAVA_HOME") {
+            let jarsigner = PathBuf::from(java).join("bin").join(bin!("jarsigner"));
+            if jarsigner.exists() {
+                return Ok(Command::new(jarsigner));
+            }
+        }
+        Err(NdkError::CmdNotFound("jarsigner".to_string()))
+    }
+
+    pub fn bundle_tool(&self) -> Result<Command, NdkError> {
+        if let Ok(java_bin) = which::which(bin!("java")) {
+            let mut command = Command::new(java_bin);
+            command.arg("-jar").arg(self.android_bundle_tools()?);
+            return Ok(command);
+        }
+        if let Ok(java) = std::env::var("JAVA_HOME") {
+            let java_bin = PathBuf::from(java).join("bin").join(bin!("java"));
+            if java_bin.exists() {
+                let mut command = Command::new(java_bin);
+                command.arg("-jar").arg(self.android_bundle_tools()?);
+                return Ok(command);
+            }
+        }
+        Err(NdkError::CmdNotFound("java".to_string()))
+    }
+
     pub fn debug_key(&self) -> Result<Key, NdkError> {
-        let path = self.android_user_home()?.join("debug.keystore");
+        let path = self.android_user_home()?.join("cargo_apk_debug.keystore");
         let password = DEFAULT_DEV_KEYSTORE_PASSWORD.to_owned();
 
         if !path.exists() {
@@ -467,7 +522,7 @@ impl Ndk {
                 return Err(NdkError::CmdFailed(Box::new(keytool)));
             }
         }
-        Ok(Key { path, password })
+        Ok(Key { path, password, alias: "androiddebugkey".to_owned() })
     }
 
     pub fn sysroot_lib_dir(&self, target: Target) -> Result<PathBuf, NdkError> {
@@ -540,6 +595,7 @@ impl Ndk {
 pub struct Key {
     pub path: PathBuf,
     pub password: String,
+    pub alias: String,
 }
 
 #[cfg(test)]

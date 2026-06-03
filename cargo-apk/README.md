@@ -121,8 +121,8 @@ shared_user_id = "my.shared.user.id"
 # Controls where the app is installed. "preferExternal" or "auto". Defaults to internal only.
 install_location = "auto"
 
-# Defaults to `$HOME/.android/debug.keystore` for the `dev` profile. Will ONLY
-# generate a new debug.keystore if this file does NOT exist. A keystore is never
+# Defaults to `$HOME/.android/cargo_apk_debug.keystore` for the `dev` profile. Will ONLY
+# generate a new cargo_apk_debug.keystore if this file does NOT exist. A keystore is never
 # auto-generated for other profiles.
 #
 # The keystore path can be absolute, or relative to the Cargo.toml file.
@@ -136,6 +136,7 @@ install_location = "auto"
 [package.metadata.android.signing.<profile>]
 path = "relative/or/absolute/path/to/my.keystore"
 keystore_password = "android"
+keystore_alias = "androiddebugkey"
 
 # See https://developer.android.com/guide/topics/manifest/uses-sdk-element
 #

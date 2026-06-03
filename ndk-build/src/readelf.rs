@@ -1,4 +1,4 @@
-use crate::apk::UnalignedApk;
+use crate::apk::LinkedResources;
 use crate::error::NdkError;
 use crate::target::Target;
 use std::collections::HashSet;
@@ -6,7 +6,7 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-impl<'a> UnalignedApk<'a> {
+impl<'a> LinkedResources<'a> {
     pub fn add_lib_recursively(
         &mut self,
         lib: &Path,
